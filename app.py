@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configurações do RD Station CRM
+# Configurações do RD Station CRM - URL CORRIGIDA
 RD_API_KEY = "SEU_TOKEN_RDSTATION"
-RD_API_URL = "https://crm.rdstation.com/api/v1/leads"
+RD_API_URL = "https://api.rd.services/platform/contacts"  # URL CORRETA para v3
 
 @app.route("/wix-lead", methods=["POST"])
 def receive_wix_lead():
@@ -21,37 +21,35 @@ def receive_wix_lead():
         logger.info(f"📥 NOVA REQUISIÇÃO RECEBIDA - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 50)
         
-        # Log dos headers recebidos
-        logger.info("📋 HEADERS RECEBIDOS:")
-        for key, value in request.headers.items():
-            logger.info(f"   {key}: {value}")
-        
         data = request.json
         logger.info("📦 DADOS RECEBIDOS DO WIX:")
         logger.info(f"   JSON Completo: {data}")
         
-        # Extraindo os campos do formulário (NOVA ESTRUTURA DO WIX)
-        ensino_medio = data.get("ensino_medio")
-        ensino_fundamental = data.get("ensino_fundamental")
+        # CORREÇÃO: Acessar a estrutura correta
+        wix_data = data.get("data", {})  # Isso está correto agora
         
-        # Determina a série de interesse baseado em qual campo foi preenchido
-        if ensino_medio:
+        # Extraindo os campos do formulário
+        ensino_medio = wix_data.get("field:ensino_medio")
+        ensino_fundamental = wix_data.get("field:ensino_fundamental")
+        
+        # Determina a série de interesse
+        if ensino_medio and ensino_medio != "6° Ano":
             serie_interesse = ensino_medio
         elif ensino_fundamental:
             serie_interesse = ensino_fundamental
         else:
             serie_interesse = "Não informado"
         
-        responsavel = data.get("first_name")
-        aluno = data.get("sobrenome_fad9")
-        email = data.get("email")
-        telefone = data.get("phone")
-        nascimento = data.get("data_de_nascimento")
-        cpf = data.get("resposta_curta_01e4")
-        ajuda_prova = data.get("precisa_de_ajuda_durante_a_prova")
-        observacao = data.get("resposta_longa_f606")
-        confirma_dados = data.get("form_field_ddd2")
-        autorizacao = data.get("form_field_68ba")
+        responsavel = wix_data.get("field:first_name")
+        aluno = wix_data.get("field:sobrenome_fad9")
+        email = wix_data.get("field:email")
+        telefone = wix_data.get("field:phone")
+        nascimento = wix_data.get("field:data_de_nascimento")
+        cpf = wix_data.get("field:resposta_curta_01e4")
+        ajuda_prova = wix_data.get("field:precisa_de_ajuda_durante_a_prova")
+        observacao = wix_data.get("field:resposta_longa_f606")
+        confirma_dados = wix_data.get("field:form_field_ddd2")
+        autorizacao = wix_data.get("field:form_field_68ba")
 
         # Log dos dados extraídos
         logger.info("🔍 DADOS EXTRAÍDOS:")
@@ -69,7 +67,7 @@ def receive_wix_lead():
         logger.info(f"   Confirma dados: {confirma_dados}")
         logger.info(f"   Autorização: {autorizacao}")
 
-        # Montando payload para o RD CRM
+        # Montando payload para o RD CRM (formato v3)
         lead = {
             "name": responsavel,
             "email": email,
@@ -84,24 +82,24 @@ def receive_wix_lead():
             "cf_autorizacao": autorizacao
         }
 
-        # Log do payload que será enviado ao RD Station
+        # Log do payload
         logger.info("🚀 PAYLOAD PARA RD STATION:")
         logger.info(f"   {lead}")
 
-        # Fazendo requisição para criar lead no RD CRM
+        # Fazendo requisição para criar lead no RD CRM (HEADERS CORRETOS)
         logger.info("📤 ENVIANDO PARA RD STATION...")
-        response = requests.post(
-            RD_API_URL,
-            headers={"Authorization": f"Bearer {RD_API_KEY}"},
-            json=lead
-        )
+        headers = {
+            "Authorization": f"Bearer {RD_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(RD_API_URL, headers=headers, json=lead)
 
-        # Log da resposta do RD Station
+        # Log da resposta
         logger.info("📥 RESPOSTA DO RD STATION:")
         logger.info(f"   Status Code: {response.status_code}")
         logger.info(f"   Response: {response.text}")
         
-        # Verifica se a resposta é JSON válido
         try:
             response_json = response.json()
         except:
@@ -118,7 +116,6 @@ def receive_wix_lead():
         })
 
     except Exception as e:
-        # Log de erro detalhado
         logger.error("❌ ERRO NO PROCESSAMENTO:")
         logger.error(f"   Tipo do erro: {type(e).__name__}")
         logger.error(f"   Mensagem: {str(e)}")
@@ -132,20 +129,12 @@ def receive_wix_lead():
             "received_data": data if 'data' in locals() else None
         }), 500
 
-# Rota de health check para testar se a API está online
+# Health check
 @app.route("/health", methods=["GET"])
 def health_check():
-    logger.info("🔍 Health check realizado")
     return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
-
-# Rota para testar o recebimento de dados
-@app.route("/test", methods=["POST"])
-def test_endpoint():
-    logger.info("🧪 TEST ENDPOINT ACESSADO")
-    data = request.json
-    logger.info(f"Dados de teste recebidos: {data}")
-    return jsonify({"status": "test_ok", "received_data": data})
 
 if __name__ == "__main__":
     logger.info("🚀 API Iniciada")
     app.run(host="0.0.0.0", port=5000, debug=True)
+    
