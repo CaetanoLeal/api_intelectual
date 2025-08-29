@@ -30,22 +30,34 @@ def receive_wix_lead():
         logger.info("📦 DADOS RECEBIDOS DO WIX:")
         logger.info(f"   JSON Completo: {data}")
         
-        # Extraindo os campos do formulário
-        serie = data.get("serie_interesse")
-        responsavel = data.get("responsavel")
-        aluno = data.get("aluno")
+        # Extraindo os campos do formulário (NOVA ESTRUTURA DO WIX)
+        ensino_medio = data.get("ensino_medio")
+        ensino_fundamental = data.get("ensino_fundamental")
+        
+        # Determina a série de interesse baseado em qual campo foi preenchido
+        if ensino_medio:
+            serie_interesse = ensino_medio
+        elif ensino_fundamental:
+            serie_interesse = ensino_fundamental
+        else:
+            serie_interesse = "Não informado"
+        
+        responsavel = data.get("first_name")
+        aluno = data.get("sobrenome_fad9")
         email = data.get("email")
-        telefone = data.get("telefone")
-        nascimento = data.get("data_nascimento")
-        cpf = data.get("cpf")
-        ajuda_prova = data.get("ajuda_prova")
-        observacao = data.get("observacao")
-        confirma_dados = data.get("confirma_dados")
-        autorizacao = data.get("autorizacao")
+        telefone = data.get("phone")
+        nascimento = data.get("data_de_nascimento")
+        cpf = data.get("resposta_curta_01e4")
+        ajuda_prova = data.get("precisa_de_ajuda_durante_a_prova")
+        observacao = data.get("resposta_longa_f606")
+        confirma_dados = data.get("form_field_ddd2")
+        autorizacao = data.get("form_field_68ba")
 
         # Log dos dados extraídos
         logger.info("🔍 DADOS EXTRAÍDOS:")
-        logger.info(f"   Série interesse: {serie}")
+        logger.info(f"   Ensino Médio: {ensino_medio}")
+        logger.info(f"   Ensino Fundamental: {ensino_fundamental}")
+        logger.info(f"   Série interesse: {serie_interesse}")
         logger.info(f"   Responsável: {responsavel}")
         logger.info(f"   Aluno: {aluno}")
         logger.info(f"   Email: {email}")
@@ -63,7 +75,7 @@ def receive_wix_lead():
             "email": email,
             "personal_phone": telefone,
             "cf_aluno": aluno,
-            "cf_serie_interesse": serie,
+            "cf_serie_interesse": serie_interesse,
             "cf_data_nascimento": nascimento,
             "cf_cpf": cpf,
             "cf_ajuda_prova": ajuda_prova,
