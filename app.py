@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import logging
 from datetime import datetime
+import json
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -24,6 +25,7 @@ def crm_find_contact_by_email(email: str):
         return None
     try:
         r = requests.get(f"{CRM_BASE}/contacts", params={**auth_params(), "email": email}, timeout=30)
+        logger.info(f"Buscar contato por email={email}, status={r.status_code}, resp={r.text}")
         if r.status_code == 200:
             items = r.json().get("items") or r.json().get("contacts") or []
             return items[0] if items else None
@@ -38,19 +40,21 @@ def crm_create_contact(contact_data: dict):
         "emails": [contact_data.get("email")] if contact_data.get("email") else [],
         "phones": [contact_data.get("personal_phone")] if contact_data.get("personal_phone") else [],
         "custom_fields": [
-            {"custom_field_id": "685ac5b788f78e001fd61690", "value": contact_data.get("cf_aluno")}, # Nome do Aluno
-            {"custom_field_id": "685ac789ef58410018d21e32", "value": contact_data.get("cf_serie")}, # Série
-            {"custom_field_id": "68b22d41efed600017c2d72b", "value": contact_data.get("cf_cpf")},   # CPF
-            {"custom_field_id": "68b22d59b64e5d0018e2b5f5", "value": contact_data.get("cf_data_nascimento")} # Data nascimento
+            {"custom_field_id": "685ac5b788f78e001fd61690", "value": contact_data.get("cf_aluno")},
+            {"custom_field_id": "685ac789ef58410018d21e32", "value": contact_data.get("cf_serie")},
+            {"custom_field_id": "68b22d41efed600017c2d72b", "value": contact_data.get("cf_cpf")},
+            {"custom_field_id": "68b22d59b64e5d0018e2b5f5", "value": contact_data.get("cf_data_nascimento")}
         ]
     }
-    # remove None/vazios
     payload["custom_fields"] = [f for f in payload["custom_fields"] if f["value"]]
+    logger.info(f"Payload criar contato: {json.dumps(payload, ensure_ascii=False)}")
     r = requests.post(f"{CRM_BASE}/contacts", params=auth_params(), json=payload, timeout=30)
+    logger.info(f"Resposta criar contato: status={r.status_code}, resp={r.text}")
     return r
 
 def get_pipeline_id_by_name(name: str):
     r = requests.get(f"{CRM_BASE}/deal_pipelines", params=auth_params(), timeout=30)
+    logger.info(f"Listar pipelines status={r.status_code}, resp={r.text}")
     if r.status_code != 200:
         raise RuntimeError(f"Falha ao listar funis: {r.status_code} {r.text}")
     items = r.json().get("items") or r.json()
@@ -62,6 +66,7 @@ def get_pipeline_id_by_name(name: str):
 def get_stage_id_for_pipeline(pipeline_id: str, preferred_name: str = None):
     params = {**auth_params(), "deal_pipeline_id": pipeline_id}
     r = requests.get(f"{CRM_BASE}/deal_stages", params=params, timeout=30)
+    logger.info(f"Listar etapas status={r.status_code}, resp={r.text}")
     if r.status_code != 200:
         raise RuntimeError(f"Falha ao listar etapas: {r.status_code} {r.text}")
     stages = r.json().get("items") or r.json()
@@ -90,13 +95,17 @@ def create_deal_for_contact(contact_id: str, stage_id: str, title: str, value: f
         ]
     }
     payload["custom_fields"] = [f for f in payload["custom_fields"] if f["value"]]
+    logger.info(f"Payload criar deal: {json.dumps(payload, ensure_ascii=False)}")
     r = requests.post(f"{CRM_BASE}/deals", params=auth_params(), json=payload, timeout=30)
+    logger.info(f"Resposta criar deal: status={r.status_code}, resp={r.text}")
     return r
 
 @app.route("/wix-lead", methods=["POST"])
 def receive_wix_lead():
     try:
         data = request.json
+        logger.info(f"Recebido do Wix: {json.dumps(data, ensure_ascii=False)}")
+
         if not data or 'data' not in data:
             return jsonify({"error": "Dados inválidos"}), 400
 
@@ -110,15 +119,18 @@ def receive_wix_lead():
             "cf_cpf": wix_data.get("field:resposta_curta_01e4"),
             "cf_data_nascimento": wix_data.get("field:data_de_nascimento"),
         }
+        logger.info(f"Montado contact_info: {contact_info}")
 
         existing = crm_find_contact_by_email(contact_info.get("email"))
         if existing:
             contact_id = existing.get("id")
+            logger.info(f"Contato já existia id={contact_id}")
         else:
             c = crm_create_contact(contact_info)
             if c.status_code not in (200, 201):
                 return jsonify({"error": "Falha ao criar contato", "details": c.text}), c.status_code
             contact_id = c.json().get("id")
+            logger.info(f"Contato criado id={contact_id}")
 
         pipeline_id = get_pipeline_id_by_name(PIPELINE_NAME)
         stage_id = get_stage_id_for_pipeline(pipeline_id, FIRST_STAGE_NAME)
@@ -135,6 +147,7 @@ def receive_wix_lead():
 
         if d.status_code in (200, 201):
             deal = d.json()
+            logger.info(f"Negociação criada id={deal.get('id')}")
             return jsonify({
                 "status": "success",
                 "contact_id": contact_id,
