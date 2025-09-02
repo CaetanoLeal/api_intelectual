@@ -16,19 +16,18 @@ CRM_BASE = "https://crm.rdstation.com/api/v1"
 PIPELINE_NAME = "matriculas 2026"
 FIRST_STAGE_NAME = None  # usa a primeira etapa
 
-def auth_params():
-    return {"token": RD_CRM_TOKEN}
+def auth_headers():
+    return {"Authorization": f"Bearer {RD_CRM_TOKEN}"}
 
 # ---------- CONTACT ----------
 def crm_find_contact_by_email(email: str):
     if not email:
         return None
     try:
-        r = requests.get(f"{CRM_BASE}/contacts", params={**auth_params(), "email": email}, timeout=30)
+        r = requests.get(f"{CRM_BASE}/contacts/email/{email}", headers=auth_headers(), timeout=30)
         logger.info(f"Buscar contato por email={email}, status={r.status_code}, resp={r.text}")
         if r.status_code == 200:
-            items = r.json().get("items") or r.json().get("contacts") or []
-            return items[0] if items else None
+            return r.json()
         return None
     except Exception:
         logger.exception("Erro ao buscar contato")
@@ -37,8 +36,8 @@ def crm_find_contact_by_email(email: str):
 def crm_create_contact(contact_data: dict):
     payload = {
         "name": contact_data.get("name"),
-        "emails": [contact_data.get("email")] if contact_data.get("email") else [],
-        "phones": [contact_data.get("personal_phone")] if contact_data.get("personal_phone") else [],
+        "emails": [{"email": contact_data.get("email"), "type": "personal"}] if contact_data.get("email") else [],
+        "phones": [{"phone": contact_data.get("personal_phone"), "type": "mobile"}] if contact_data.get("personal_phone") else [],
         "custom_fields": [
             {"custom_field_id": "685ac5b788f78e001fd61690", "value": contact_data.get("cf_aluno")},
             {"custom_field_id": "685ac789ef58410018d21e32", "value": contact_data.get("cf_serie")},
@@ -48,12 +47,12 @@ def crm_create_contact(contact_data: dict):
     }
     payload["custom_fields"] = [f for f in payload["custom_fields"] if f["value"]]
     logger.info(f"Payload criar contato: {json.dumps(payload, ensure_ascii=False)}")
-    r = requests.post(f"{CRM_BASE}/contacts", params=auth_params(), json=payload, timeout=30)
+    r = requests.post(f"{CRM_BASE}/contacts", headers=auth_headers(), json=payload, timeout=30)
     logger.info(f"Resposta criar contato: status={r.status_code}, resp={r.text}")
     return r
 
 def get_pipeline_id_by_name(name: str):
-    r = requests.get(f"{CRM_BASE}/deal_pipelines", params=auth_params(), timeout=30)
+    r = requests.get(f"{CRM_BASE}/deal_pipelines", headers=auth_headers(), timeout=30)
     logger.info(f"Listar pipelines status={r.status_code}, resp={r.text}")
     if r.status_code != 200:
         raise RuntimeError(f"Falha ao listar funis: {r.status_code} {r.text}")
@@ -64,8 +63,7 @@ def get_pipeline_id_by_name(name: str):
     raise RuntimeError(f"Funil '{name}' não encontrado")
 
 def get_stage_id_for_pipeline(pipeline_id: str, preferred_name: str = None):
-    params = {**auth_params(), "deal_pipeline_id": pipeline_id}
-    r = requests.get(f"{CRM_BASE}/deal_stages", params=params, timeout=30)
+    r = requests.get(f"{CRM_BASE}/deal_stages", headers=auth_headers(), params={"deal_pipeline_id": pipeline_id}, timeout=30)
     logger.info(f"Listar etapas status={r.status_code}, resp={r.text}")
     if r.status_code != 200:
         raise RuntimeError(f"Falha ao listar etapas: {r.status_code} {r.text}")
@@ -80,12 +78,13 @@ def get_stage_id_for_pipeline(pipeline_id: str, preferred_name: str = None):
     return stages_sorted[0].get("id")
 
 def create_deal_for_contact(contact_id: str, stage_id: str, title: str, value: float = 0.0, deal_data: dict = None):
+    pipeline_id = get_pipeline_id_by_name(PIPELINE_NAME)
     payload = {
         "name": title,
         "value": value,
         "currency": "BRL",
         "deal_stage_id": stage_id,
-        "pipeline_id": get_pipeline_id_by_name(PIPELINE_NAME),
+        "deal_pipeline_id": pipeline_id,
         "contact_id": contact_id,
         "notes": "Origem: Formulário Wix (matriculas 2026)",
         "custom_fields": [
@@ -96,7 +95,7 @@ def create_deal_for_contact(contact_id: str, stage_id: str, title: str, value: f
     }
     payload["custom_fields"] = [f for f in payload["custom_fields"] if f["value"]]
     logger.info(f"Payload criar deal: {json.dumps(payload, ensure_ascii=False)}")
-    r = requests.post(f"{CRM_BASE}/deals", params=auth_params(), json=payload, timeout=30)
+    r = requests.post(f"{CRM_BASE}/deals", headers=auth_headers(), json=payload, timeout=30)
     logger.info(f"Resposta criar deal: status={r.status_code}, resp={r.text}")
     return r
 
@@ -122,7 +121,7 @@ def receive_wix_lead():
         logger.info(f"Montado contact_info: {contact_info}")
 
         existing = crm_find_contact_by_email(contact_info.get("email"))
-        if existing:
+        if existing and existing.get("id"):
             contact_id = existing.get("id")
             logger.info(f"Contato já existia id={contact_id}")
         else:
