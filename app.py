@@ -12,30 +12,26 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # ========= CONFIG =========
-RD_CRM_TOKEN = os.getenv("RD_CRM_TOKEN", "SEU_TOKEN_AQUI")
+RD_CRM_TOKEN = "685d3cf0e1321000184f38fc"
 CRM_BASE = "https://crm.rdstation.com/api/v1"
 PIPELINE_NAME = "matriculas 2026"
-FIRST_STAGE_NAME = None           # usa a primeira etapa do funil
-USE_QUERY_TOKEN_FALLBACK = True   # se sua conta não aceitar Bearer, mantém compatibilidade
-
-def auth_headers():
-    return {
-        "Authorization": f"Bearer {RD_CRM_TOKEN}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-def auth_params():
-    # Fallback opcional para contas que exigem ?token=
-    return {"token": RD_CRM_TOKEN} if USE_QUERY_TOKEN_FALLBACK else {}
+FIRST_STAGE_NAME = None  # usa a primeira etapa do funil
 
 def _req(method, path, *, params=None, json_body=None, timeout=30):
     url = f"{CRM_BASE}{path}"
-    params = {**(params or {}), **auth_params()}
+    # Todas as requisições no CRM exigem ?token=TOKEN
+    params = {**(params or {}), "token": RD_CRM_TOKEN}
     try:
         r = requests.request(
-            method, url, headers=auth_headers(), params=params, json=json_body,
-            timeout=timeout, allow_redirects=False
+            method, url,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json"
+            },
+            params=params,
+            json=json_body,
+            timeout=timeout,
+            allow_redirects=False
         )
         logger.info(f"{method} {url} -> {r.status_code}  resp={r.text[:600]}")
         return r
@@ -45,11 +41,6 @@ def _req(method, path, *, params=None, json_body=None, timeout=30):
 
 # ---------- CONTACTS ----------
 def crm_find_contact_by_email(email: str):
-    """
-    Busca contato por e-mail no RD Station CRM.
-    Endpoint correto: GET /contacts?email=<email>
-    Retorna o primeiro contato encontrado ou None.
-    """
     if not email:
         return None
     r = _req("GET", "/contacts", params={"email": email})
@@ -58,22 +49,15 @@ def crm_find_contact_by_email(email: str):
         items = data.get("items") or data.get("contacts") or data if isinstance(data, list) else []
         return items[0] if items else None
     if r.status_code == 404:
-        # Nenhum contato encontrado
         return None
-    # Qualquer outro caso tratar como não encontrado
     logger.warning(f"Busca por email retornou status inesperado: {r.status_code}")
     return None
 
 def crm_create_contact(contact_data: dict):
-    """
-    Cria contato no CRM.
-    Payload com emails/phones como objetos (formato mais aceito).
-    """
     email = contact_data.get("email")
     phone = contact_data.get("personal_phone")
     payload = {
         "name": contact_data.get("name"),
-        # formatos aceitos costumam incluir type (personal, work) / (mobile, work, home)
         "emails": ([{"email": email, "type": "personal"}] if email else []),
         "phones": ([{"phone": phone, "type": "mobile"}] if phone else []),
         "custom_fields": [
@@ -83,7 +67,6 @@ def crm_create_contact(contact_data: dict):
             {"custom_field_id": "68b22d59b64e5d0018e2b5f5", "value": contact_data.get("cf_data_nascimento")},
         ]
     }
-    # remove campos vazios
     payload["custom_fields"] = [f for f in payload["custom_fields"] if f.get("value")]
     logger.info(f"Payload criar contato: {json.dumps(payload, ensure_ascii=False)}")
     return _req("POST", "/contacts", json_body=payload)
@@ -157,13 +140,11 @@ def receive_wix_lead():
         }
         logger.info(f"Montado contact_info: {contact_info}")
 
-        # Estratégia "cria-ou-busca": tenta criar; se API retornar conflito/422, busca por e-mail.
         created = crm_create_contact(contact_info)
         if created.status_code in (200, 201):
             contact_id = created.json().get("id")
             logger.info(f"Contato criado id={contact_id}")
         else:
-            # Se já existe / erro de validação, tenta localizar por e-mail
             if created.status_code in (409, 422):
                 existing = crm_find_contact_by_email(contact_info.get("email"))
                 if existing:
